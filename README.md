@@ -5,58 +5,70 @@ This application helps users improve their spoken English skills through interac
 ## Features
 
 *   **Practice Modules:**
-    *   Introduction & Interview
-    *   Long Turn (Cue Card)
-    *   Discussion
-    *   Pronunciation Drills
-    *   Grammar Challenges
-*   **Real-time Feedback:** Transcription, grammar correction, pronunciation analysis.
-*   **AI Analysis:** Utilizes AI (like Google Gemini) for comprehensive feedback on grammar, pronunciation, fluency, vocabulary, and coherence.
-*   **Progress Tracking:** View performance reports and track improvement over time.
-*   **User Profiles:** Manage personal settings and goals.
-*   **Topic Selection:** Choose specific topics for practice.
+    *   Introduction & Interview (`PracticePage.jsx` - Intro Tab)
+    *   Long Turn / Cue Card (`PracticePage.jsx` - Cue Card Tab)
+    *   Discussion (`PracticePage.jsx` - Discussion Tab)
+    *   Pronunciation Drills (`PracticePage.jsx` - Pronunciation Tab)
+    *   Grammar Challenges (`PracticePage.jsx` - Grammar Tab)
+*   **Real-time Feedback:**
+    *   Transcription via Voice Input (`VoiceInput.jsx`)
+    *   Grammar Correction (`GrammarFeedback.jsx`, `/grammar/correct` endpoint)
+    *   Pronunciation Analysis (`PronunciationFeedback.jsx`, `/pronunciation/analyze` endpoint)
+    *   Highlighting issues directly on the transcript (`PracticePage.jsx`)
+*   **AI Analysis:** Utilizes Google Gemini (`gemini_service.py`) for:
+    *   Generating questions (Interview, Discussion)
+    *   Evaluating responses (Discussion)
+    *   Generating grammar challenges
+    *   Comprehensive session reports (`/reports/session-summary`)
+*   **Progress Tracking:** View performance reports and track improvement over time (`ProgressPage.jsx`, `/reports/progress` endpoint).
+*   **User Profiles:** Manage personal settings, goals, and view stats (`ProfilePage.jsx`).
+*   **Topic Selection:** Choose specific topics for practice (`TopicSelector.jsx`, `PracticePage.jsx`).
+*   **Achievements:** Track milestones (`/reports/achievements/{user_id}` endpoint).
 
 ## Tech Stack
 
-*   **Frontend:** React, Vite, Tailwind CSS, DaisyUI
-*   **Backend:** Python, FastAPI
-*   **AI:** Google Gemini API
-*   **Database/Storage:** (Specify if using Appwrite or other)
+*   **Frontend:** React, Vite, Tailwind CSS, DaisyUI (`package.json`, `tailwind.config.js`)
+*   **Backend:** Python, FastAPI (`main.py`, `api/`)
+*   **AI:** Google Gemini API (`gemini_service.py`)
+*   **Database/Storage:** Appwrite (implied by `.env`)
 
 ## Project Structure
 
 ```
 /backend
   /app
-    /api      # API endpoints (FastAPI routers)
-    /models   # Pydantic schemas
-    /services # Business logic, AI interactions
-    /core     # Configuration
+    /api      # API endpoints (FastAPI routers: conversation.py, practice.py, reports.py, etc.)
+    /models   # Pydantic schemas (schemas.py)
+    /services # Business logic, AI interactions (gemini_service.py, lesson_service.py)
+    /core     # Configuration (potentially)
   main.py     # FastAPI app entry point
-  requirements.txt
-  .env        # Environment variables (API keys, etc.)
+  requirements.txt # Python dependencies
+  .env        # Environment variables (API keys, Appwrite config)
 /frontend
   /src
-    /components # Reusable React components
-    /Pages      # Page-level components
+    /components # Reusable React components (VoiceInput.jsx, Navbar.jsx, Feedback.jsx, etc.)
+    /Pages      # Page-level components (HomePage.jsx, PracticePage.jsx, ProfilePage.jsx, etc.)
     App.jsx     # Main application component
     main.jsx    # React entry point
+    index.css   # Main CSS imports
+    App.css     # Custom CSS styles
   public/
   index.html
   package.json
   vite.config.js
-  tailwind.config.js
-README.md
-tailwind.config.js # Root Tailwind config for shared settings
-.gitignore         # Git ignore rules
+  tailwind.config.js # Frontend Tailwind config
+  postcss.config.js
+  eslint.config.js
+README.md          # This file
+.gitignore         # Root Git ignore rules
 ```
 
 ## Setup
 
 ### Prerequisites
 
-*   Node.js and npm/yarn/pnpm
-*   Python 3.8+ and pip
+*   Node.js and npm (or yarn/pnpm) (`package.json`)
+*   Python 3.8+ and pip (`requirements.txt`)
 *   Git
 
 ### Backend Setup
@@ -65,7 +77,7 @@ tailwind.config.js # Root Tailwind config for shared settings
     ```bash
     cd backend
     ```
-2.  Create a virtual environment (optional but recommended):
+2.  Create a virtual environment (recommended):
     ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
@@ -74,7 +86,7 @@ tailwind.config.js # Root Tailwind config for shared settings
     ```bash
     pip install -r requirements.txt
     ```
-4.  Create a `.env` file based on the example or context provided, including your `GEMINI_API_KEY` and any other necessary keys.
+4.  Create or verify the `.env` file in the `backend` directory with your `GEMINI_API_KEY` and Appwrite credentials (`.env` example).
 5.  Run the backend server:
     ```bash
     uvicorn main:app --reload
@@ -90,12 +102,10 @@ tailwind.config.js # Root Tailwind config for shared settings
 2.  Install dependencies:
     ```bash
     npm install
-    # or yarn install or pnpm install
     ```
 3.  Run the development server:
     ```bash
     npm run dev
-    # or yarn dev or pnpm dev
     ```
     The frontend will typically be available at `http://localhost:5173` (or another port specified by Vite).
 
@@ -103,14 +113,21 @@ tailwind.config.js # Root Tailwind config for shared settings
 
 1.  Ensure both the backend and frontend servers are running.
 2.  Open your web browser and navigate to the frontend URL (e.g., `http://localhost:5173`).
-3.  Register or log in to start practicing.
+3.  Register or log in (`Login.jsx`) to start practicing.
 
-## API Endpoints (Examples)
+## API Endpoints (Examples from Code)
 
-*   `POST /conversation/chat`: Handles chat interactions.
-*   `POST /grammar/correct`: Checks grammar for provided text.
-*   `POST /transcription/`: Transcribes uploaded audio.
-*   `POST /pronunciation/analyze`: Analyzes pronunciation based on text and audio.
-*   `POST /reports/session-summary`: Generates a detailed session report.
+*   `/practice/session/start` (POST): Initialize a practice session.
+*   `/conversation/interview/questions` (POST): Get interview questions.
+*   `/practice/cue-card` (POST): Get a cue card topic.
+*   `/practice/discussion/questions` (POST): Get discussion questions.
+*   `/practice/discussion/evaluate` (POST): Evaluate a discussion response.
+*   `/practice/grammar/challenges` (POST): Get grammar exercises.
+*   `/grammar/correct` (POST): Check grammar in provided text.
+*   `/pronunciation/analyze` (POST): Analyze pronunciation based on text and audio transcription.
+*   `/transcription/` (POST): Endpoint likely used by `VoiceInput.jsx` to get text from audio.
+*   `/reports/session-summary` (POST): Generate a detailed session report.
+*   `/reports/progress` (POST): Get user progress statistics over time.
+*   `/reports/achievements/{user_id}` (GET): Retrieve user achievements.
 
-*(Add more details as needed)*
+*(This list is based on observed code and may not be exhaustive.)*

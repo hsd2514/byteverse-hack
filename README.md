@@ -115,7 +115,7 @@ README.md          # This file
 2.  Open your web browser and navigate to the frontend URL (e.g., `http://localhost:5173`).
 3.  Register or log in (`Login.jsx`) to start practicing.
 
-## API Endpoints (Examples from Code)
+## API Endpoints 
 
 *   `/practice/session/start` (POST): Initialize a practice session.
 *   `/conversation/interview/questions` (POST): Get interview questions.
@@ -130,4 +130,4 @@ README.md          # This file
 *   `/reports/progress` (POST): Get user progress statistics over time.
 *   `/reports/achievements/{user_id}` (GET): Retrieve user achievements.
 
-*(This list is based on observed code and may not be exhaustive.)*
+

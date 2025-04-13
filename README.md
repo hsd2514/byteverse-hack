@@ -1,6 +1,6 @@
 # LinguaLearn: AI-Powered Spoken English Practice App
 
-![LinguaLearn Logo](frontend/public/vite.svg)
+![LinguaLearn Logo]
 
 ## Overview
 
@@ -116,15 +116,10 @@ LinguaLearn follows a modern client-server architecture with a React frontend an
 ### Backend
 * **Framework**: FastAPI (Python 3.11+)
 * **API Documentation**: Swagger UI / ReDoc
-* **Speech Recognition**: OpenAI Whisper API
+* **Speech Recognition**: OpenAI 
 * **Language Models**: Google Gemini API
 * **Audio Processing**: FFmpeg
 
-### DevOps & Infrastructure
-* **Deployment**: Docker containers
-* **Authentication**: JWT tokens
-* **Storage**: Local file system (audio) / Database (user data)
-* **Monitoring**: FastAPI built-in monitoring
 
 ## Project Structure
 

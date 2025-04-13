@@ -1,15 +1,45 @@
-from fastapi import APIRouter, HTTPException
+import os
+import shutil
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+import logging
+from dotenv import load_dotenv
+
 from ..models.schemas import (
     PracticeType, ProficiencyLevel, PracticeSessionRequest,
     PracticeSessionResponse, CueCardRequest, CueCardResponse,
-    FeedbackRequest, FeedbackSummaryResponse
+    FeedbackRequest, FeedbackSummaryResponse, TranscriptionResponse
 )
 from ..services.gemini_service import generate_response
+from ..services.whisper_service import transcribe_audio
 import uuid
-from datetime import datetime
-from typing import Dict, Any, List, Optional
+
+from appwrite.client import Client
+from appwrite.services.databases import Databases
+from appwrite.services.account import Account
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Initialize Appwrite client
+client = Client()
+client.set_endpoint(os.getenv('APPWRITE_ENDPOINT'))  # Replace with your Appwrite endpoint
+client.set_project(os.getenv('APPWRITE_PROJECT_ID'))  # Replace with your Appwrite project ID
+client.set_key(os.getenv('APPWRITE_API_KEY'))  # Replace with your Appwrite API key
+
+db = Databases(client)
+account = Account(client)
 
 router = APIRouter(prefix="/practice", tags=["practice"])
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Define upload directory relative to this file's location or use absolute path
+UPLOAD_DIR = "temp_audio"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/session/start", response_model=PracticeSessionResponse)
 async def start_practice_session(request: PracticeSessionRequest):
@@ -130,41 +160,128 @@ async def get_cue_card(request: CueCardRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate cue card: {str(e)}")
 
-@router.post("/session/feedback", response_model=FeedbackSummaryResponse)
-async def get_session_feedback(request: FeedbackRequest):
+@router.post("/session/feedback", response_model=Dict[str, Any])
+async def get_session_feedback(request: dict):
     """
     Get AI-generated feedback on a practice session.
-    """
-    try:
-        # In a real implementation, this would analyze the session data
-        # For demonstration, we'll return mock feedback
-        
-        return {
-            "grammar_score": 8.5,
-            "pronunciation_score": 7.8,
-            "fluency_score": 7.2,
-            "vocabulary_score": 8.0,
-            "strengths": [
-                "Good use of transition words",
-                "Varied sentence structure",
-                "Appropriate vocabulary for the topic"
-            ],
-            "areas_to_improve": [
-                "Occasional issues with past tense forms",
-                "Some pronunciation difficulties with 'th' sounds",
-                "Hesitations in longer sentences"
-            ],
-            "suggested_exercises": [
-                "Practice past tense verbs in context",
-                "Focused pronunciation exercises on 'th' sounds",
-                "Fluency drills with longer sentences"
-            ],
-            "progress_percentage": 15,  # Improvement percentage
-            "success": True
-        }
     
+    Analyzes the user's transcript and provides detailed feedback using Gemini.
+    """
+    feedback = {} # Initialize feedback dict
+    try:
+        # Import necessary functions from gemini_service here
+        from ..services.gemini_service import (
+            analyze_pronunciation,
+            analyze_grammar_response,
+            evaluate_discussion_response,
+            evaluate_cue_card_response,
+            evaluate_general_speaking
+        )
+        
+        # Extract information from the request
+        practice_type = request.get("practice_type", "general")
+        transcript = request.get("text", "")
+        question = request.get("question", "")
+        # Get proficiency level string and convert to enum
+        proficiency_level_str = request.get("proficiency_level", ProficiencyLevel.INTERMEDIATE.value)
+        try:
+            proficiency_level = ProficiencyLevel(proficiency_level_str)
+        except ValueError:
+            proficiency_level = ProficiencyLevel.INTERMEDIATE # Default if invalid string
+            
+        corrections = request.get("corrections", [])
+        pronunciation_analysis = request.get("pronunciation_analysis", {})
+        
+        if not transcript:
+            # Return a specific error structure if no transcript
+            return {
+                "error": "No transcript provided for analysis",
+                "success": False,
+                "practice_type": practice_type,
+                "transcript": transcript,
+                "question": question,
+                # Include default score/feedback structure even on input error
+                "task_completion_score": None, 
+                "coherence_score": None,
+                "grammar_score": None,
+                "vocabulary_score": None, 
+                "fluency_score": None,
+                "pronunciation_score": None, # Ensure this is included if applicable
+                "overall_score": None,
+                "band_descriptor": None,
+                "strengths": [],
+                "areas_to_improve": [],
+                "suggested_exercises": [],
+                "punctuation_feedback": None,
+                "sentence_structure_feedback": None
+            }
+            
+        # Get the appropriate service based on practice type
+        # Use the imported functions directly
+        if practice_type == "pronunciation":
+            feedback = await analyze_pronunciation(transcript, pronunciation_analysis, proficiency_level)
+        elif practice_type == "grammar":
+            feedback = await analyze_grammar_response(transcript, question, corrections, proficiency_level)
+        elif practice_type == "discussion":
+            feedback = await evaluate_discussion_response(question, transcript, proficiency_level)
+        elif practice_type == "cue_card":
+            feedback = await evaluate_cue_card_response(question, transcript, proficiency_level)
+        else:
+            # General speaking assessment
+            feedback = await evaluate_general_speaking(question, transcript, proficiency_level, corrections, pronunciation_analysis)
+        
+        # Add basic metadata to the response
+        feedback["practice_type"] = practice_type
+        feedback["transcript"] = transcript
+        feedback["question"] = question
+        # Success is true if no exception occurred AND the service didn't return an explicit error key
+        feedback["success"] = "error" not in feedback 
+        
+        # Ensure expected fields are present (even if None)
+        # Use setdefault which adds the key only if it's missing
+        feedback.setdefault("task_completion_score", None)
+        feedback.setdefault("coherence_score", None)
+        feedback.setdefault("grammar_score", None)
+        feedback.setdefault("vocabulary_score", None)
+        feedback.setdefault("fluency_score", None)
+        feedback.setdefault("pronunciation_score", None) # Ensure this is included
+        feedback.setdefault("overall_score", None)
+        feedback.setdefault("band_descriptor", None)
+        feedback.setdefault("strengths", [])
+        feedback.setdefault("areas_to_improve", [])
+        feedback.setdefault("suggested_exercises", [])
+        feedback.setdefault("punctuation_feedback", None)
+        feedback.setdefault("sentence_structure_feedback", None)
+        # If the service returned an error (e.g., from fallback), keep it
+        feedback.setdefault("error", None) 
+
+        return feedback
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate feedback: {str(e)}")
+        logger.error(f"Error in AI feedback generation endpoint: {str(e)}", exc_info=True) 
+        # Construct a detailed error response matching the expected structure
+        error_message = f"Failed to generate feedback: {str(e)}"
+        # Return a structure consistent with successful responses but indicating failure
+        return {
+            "error": error_message,
+            "success": False,
+            "practice_type": request.get("practice_type", "unknown"),
+            "transcript": request.get("text", ""),
+            "question": request.get("question", ""),
+            "task_completion_score": None, 
+            "coherence_score": None,
+            "grammar_score": None, # Use None instead of arbitrary numbers
+            "vocabulary_score": None, 
+            "fluency_score": None,
+            "pronunciation_score": None, # Ensure this is included
+            "overall_score": None,
+            "band_descriptor": None,
+            "strengths": ["Unable to analyze strengths due to technical error."],
+            "areas_to_improve": ["Analysis failed. Please try again later."],
+            "suggested_exercises": ["Please try again later."],
+            "punctuation_feedback": "Punctuation analysis unavailable due to error.", 
+            "sentence_structure_feedback": "Sentence structure analysis unavailable due to error." 
+        }
 
 @router.post("/discussion/questions", response_model=Dict[str, Any])
 async def get_discussion_questions(
@@ -299,3 +416,115 @@ async def evaluate_grammar(
         return {"evaluation": evaluation, "success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to evaluate grammar correction: {str(e)}")
+
+@router.post("/transcribe", response_model=TranscriptionResponse)
+async def handle_transcription(
+    audio_file: UploadFile = File(...)
+):
+    """
+    Receives audio file, saves it temporarily, transcribes it, 
+    and returns the transcription text and pronunciation analysis.
+    """
+    file_path = None
+    try:
+        # Ensure the upload directory exists
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        
+        # Extract file extension from filename or use .webm as default
+        filename = audio_file.filename
+        file_extension = os.path.splitext(filename)[1].lower() if filename and "." in filename else ".webm"
+        
+        # Create a temporary file path with proper extension
+        file_path = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_recording{file_extension}")
+        
+        logger.info(f"Saving uploaded audio file to: {file_path} (Content-Type: {audio_file.content_type})")
+        
+        # Save the uploaded file
+        content = await audio_file.read()
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+            
+        logger.info(f"Audio file saved successfully. Size: {len(content)} bytes. Starting transcription for {file_path}")
+
+        # Call the transcription service
+        result = await transcribe_audio(file_path)
+        
+        logger.info(f"Transcription result for {file_path}: Success={result.get('success')}")
+
+        if not result or not result.get("success"):
+            error_msg = result.get("error", "Transcription failed")
+            logger.error(f"Transcription failed for {file_path}: {error_msg}")
+            # Return the structure expected by TranscriptionResponse on error
+            return TranscriptionResponse(
+                text="", 
+                pronunciation_analysis={"error": error_msg}, 
+                success=False, 
+                error=error_msg
+            )
+
+        # Return the successful result matching TranscriptionResponse schema
+        return TranscriptionResponse(
+            text=result.get("text", ""),
+            pronunciation_analysis=result.get("pronunciation_analysis", {}),
+            success=True,
+            error=None
+        )
+
+    except Exception as e:
+        logger.error(f"Error in /transcribe endpoint: {str(e)}", exc_info=True)
+        # Ensure error response matches the schema
+        return TranscriptionResponse(
+            text="", 
+            pronunciation_analysis={"error": f"Server error during transcription: {str(e)}"}, 
+            success=False, 
+            error=f"Server error during transcription: {str(e)}"
+        )
+    finally:
+        # Clean up the temporary file
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Temporary file deleted: {file_path}")
+            except Exception as e:
+                logger.error(f"Error deleting temporary file {file_path}: {e}")
+
+@router.post("/auth/register")
+async def register_user(email: str, password: str):
+    try:
+        user = account.create(email=email, password=password)
+        return {"success": True, "user": user}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/auth/login")
+async def login_user(email: str, password: str):
+    try:
+        session = account.create_session(email=email, password=password)
+        return {"success": True, "session": session}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/feedback")
+async def save_feedback(user_id: str, feedback: str):
+    try:
+        result = db.create_document(
+            database_id="YOUR_DATABASE_ID",  # Replace with your database ID
+            collection_id="YOUR_COLLECTION_ID",  # Replace with your collection ID
+            document_id="unique()",
+            data={"user_id": user_id, "feedback": feedback}
+        )
+        return {"success": True, "document": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.get("/feedback/{user_id}")
+async def get_feedback(user_id: str):
+    try:
+        documents = db.list_documents(
+            database_id="YOUR_DATABASE_ID",  # Replace with your database ID
+            collection_id="YOUR_COLLECTION_ID",  # Replace with your collection ID
+            queries=["user_id=" + user_id]
+        )
+        return {"success": True, "feedback": documents}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

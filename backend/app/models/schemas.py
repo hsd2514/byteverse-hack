@@ -41,7 +41,7 @@ class WordPronunciationDetail(BaseModel):
 class TranscriptionResponse(BaseModel):
     """Response from the speech-to-text service"""
     text: str
-    pronunciation_scores: List[PronunciationScore]
+    pronunciation_analysis: Dict[str, Any] # Added - To hold Gemini's text-based analysis
     success: bool
     error: Optional[str] = None
 

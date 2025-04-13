@@ -1,9 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import GrammarFeedback from './GrammarFeedback';
 import PronunciationFeedback from './PronunciationFeedback';
 
-const Feedback = ({ transcript, corrections, pronunciationScores }) => {
+const Feedback = ({ transcript, corrections, pronunciationScores, userId }) => {
   const [activeTab, setActiveTab] = useState('grammar');
+  const [feedbackList, setFeedbackList] = useState([]);
+
+  useEffect(() => {
+    const fetchFeedback = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/feedback/${userId}`);
+        const data = await response.json();
+        if (data.success) {
+          setFeedbackList(data.feedback.documents);
+        } else {
+          console.error(data.error);
+        }
+      } catch (error) {
+        console.error('Error fetching feedback:', error);
+      }
+    };
+
+    fetchFeedback();
+  }, [userId]);
   
   return (
     <div className="card bg-base-100 shadow-xl mt-4">
@@ -55,6 +74,19 @@ const Feedback = ({ transcript, corrections, pronunciationScores }) => {
             </div>
           </div>
         )}
+
+        <div className="feedback-section mt-4">
+          <h2>User Feedback</h2>
+          {feedbackList.length > 0 ? (
+            <ul>
+              {feedbackList.map((item) => (
+                <li key={item.$id}>{item.feedback}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>No feedback available.</p>
+          )}
+        </div>
       </div>
     </div>
   );

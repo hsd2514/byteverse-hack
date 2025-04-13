@@ -5,6 +5,15 @@ const Navbar = ({ user, onLogout, onThemeChange }) => {
   const location = useLocation();
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  // Generate dynamic avatar URL based on username
+  const getAvatarUrl = (username) => {
+    const styles = ['adventurer', 'avataaars', 'bottts', 'personas', 'micah'];
+    // Use a consistent style for the same user by hashing their username to pick a style
+    const styleIndex = username ? username.charCodeAt(0) % styles.length : 0;
+    const style = styles[styleIndex];
+    return `https://api.dicebear.com/7.x/${style}/svg?seed=${encodeURIComponent(username || 'guest')}`;
+  };
 
   // Apply theme when it changes
   useEffect(() => {
@@ -19,12 +28,8 @@ const Navbar = ({ user, onLogout, onThemeChange }) => {
     setTheme(theme === 'light' ? 'dark' : 'light');
   };
 
-  const navLinks = [
-    { to: '/', label: 'Home', icon: 'home' },
-    { to: '/practice', label: 'Practice', icon: 'message-circle' },
-    { to: '/progress', label: 'Progress', icon: 'activity' },
-    { to: '/profile', label: 'Profile', icon: 'user' },
-  ];
+  // Empty the navLinks array as no main navigation is needed
+  const navLinks = [];
 
   const renderIcon = (name) => {
     const icons = {
@@ -81,44 +86,17 @@ const Navbar = ({ user, onLogout, onThemeChange }) => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h8m-8 6h16" />
             </svg>
           </label>
-          <ul tabIndex={0} className={`menu menu-sm dropdown-content mt-3 z-50 p-2 shadow bg-base-100 rounded-box w-52 ${isMenuOpen ? 'block' : 'hidden'}`}>
-            {user && navLinks.map((link) => (
-              <li key={link.to}>
-                <Link 
-                  to={link.to} 
-                  className={location.pathname === link.to ? 'active font-medium bg-base-200' : ''} 
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {renderIcon(link.icon)}
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {/* Removed the ul for mobile nav links as navLinks is empty */}
+          {/* <ul tabIndex={0} className={`menu menu-sm dropdown-content mt-3 z-50 p-2 shadow bg-base-100 rounded-box w-52 ${isMenuOpen ? 'block' : 'hidden'}`}> ... </ul> */}
         </div>
-        <Link to="/" className="btn btn-ghost normal-case text-xl">
+        <Link to={user ? "/practice" : "/"} className="btn btn-ghost normal-case text-xl">
           <span className="text-primary font-bold">Lingua</span>
           <span className="gradient-text bg-clip-text text-transparent bg-gradient-to-r from-secondary to-accent">Learn</span>
         </Link>
       </div>
       
-      <div className="navbar-center hidden lg:flex">
-        {user && (
-          <ul className="menu menu-horizontal px-1">
-            {navLinks.map((link) => (
-              <li key={link.to}>
-                <Link 
-                  to={link.to} 
-                  className={`rounded-lg mx-1 ${location.pathname === link.to ? 'bg-base-200 font-medium' : ''}`}
-                >
-                  {renderIcon(link.icon)}
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {/* Removed the navbar-center div as navLinks is empty */}
+      {/* <div className="navbar-center hidden lg:flex"> ... </div> */}
       
       <div className="navbar-end">
         <label className="swap swap-rotate btn btn-ghost btn-circle">
@@ -137,7 +115,7 @@ const Navbar = ({ user, onLogout, onThemeChange }) => {
           <div className="dropdown dropdown-end">
             <label tabIndex={0} className="btn btn-ghost btn-circle avatar online border border-primary">
               <div className="w-10 rounded-full">
-                <img src="https://i.pravatar.cc/150?img=32" alt={user} />
+                <img src={getAvatarUrl(user)} alt={user} />
               </div>
             </label>
             <ul tabIndex={0} className="mt-3 z-50 p-2 shadow menu menu-sm dropdown-content bg-base-100 rounded-box w-52">
@@ -145,9 +123,7 @@ const Navbar = ({ user, onLogout, onThemeChange }) => {
                 Signed in as <span className="font-bold text-primary">{user}</span>
               </li>
               <div className="divider my-0"></div>
-              <li><Link to="/profile" className="flex gap-2"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> Profile Settings</Link></li>
-              <li><Link to="/progress" className="flex gap-2"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg> Learning Progress</Link></li>
-              <div className="divider my-0"></div>
+
               <li>
                 <button onClick={onLogout} className="text-error flex gap-2">
                   {renderIcon('logout')}

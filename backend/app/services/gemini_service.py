@@ -3,6 +3,10 @@ import google.generativeai as genai
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from ..models.schemas import ConversationMessage, ProficiencyLevel, PracticeType
+import random # Import random
+import json   # Import json
+import logging # Added for logging
+import re # Import regex module
 
 # Load environment variables
 load_dotenv()
@@ -10,6 +14,20 @@ load_dotenv()
 # Configure Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
+
+# Configure logging
+logger = logging.getLogger(__name__) # Added logger
+
+# --- Helper Function ---
+def _clean_json_response(text: str) -> str:
+    """Removes Markdown code fences and leading/trailing whitespace from a string."""
+    # Remove ```json ... ``` or ``` ... ```
+    match = re.search(r"```(json)?(.*)```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        cleaned_text = match.group(2)
+    else:
+        cleaned_text = text
+    return cleaned_text.strip()
 
 async def generate_response(messages: List[ConversationMessage], topic: Optional[str] = None) -> str:
     """
@@ -98,7 +116,15 @@ async def generate_interview_questions(proficiency_level: ProficiencyLevel, numb
         
         # Generate response
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for generate_interview_questions:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in generate_interview_questions: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse generated interview questions: {e}"}
     
     except Exception as e:
         # Log error and return friendly message
@@ -117,7 +143,7 @@ async def analyze_interview_response(
     - proficiency_level: User's current proficiency level
     
     Returns:
-    - Dictionary with grammar feedback, pronunciation feedback, and fluency analysis
+    - Dictionary with grammar feedback, vocabulary feedback, and fluency analysis
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-pro')
@@ -150,7 +176,15 @@ async def analyze_interview_response(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for analyze_interview_response:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in analyze_interview_response: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse interview analysis: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -202,7 +236,15 @@ async def generate_discussion_questions(topic: str, proficiency_level: Proficien
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for generate_discussion_questions:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in generate_discussion_questions: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse discussion questions: {e}"}
         
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -225,7 +267,7 @@ async def evaluate_discussion_response(
     - Dictionary with detailed evaluation of the response
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-1.5-pro') # Initialize model
         
         prompt = f"""
         Evaluate this English language learner's response at {proficiency_level} level.
@@ -258,7 +300,46 @@ async def evaluate_discussion_response(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for evaluate_discussion_response:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            result = json.loads(cleaned_text) # Parse cleaned
+
+            # Ensure required fields are present
+            required_fields = ["content_score", "organization_score", "grammar_score",
+                              "vocabulary_score", "fluency_score", 
+                              "punctuation_feedback", "sentence_structure_feedback", # Added fields
+                              "overall_score", "band_descriptor", 
+                              "strengths", "areas_to_improve", "suggested_exercises"]
+
+            # If AI fails to provide a field, set scores/feedback/band to None, lists to empty
+            for field in required_fields:
+                if field not in result:
+                    if "score" in field or "feedback" in field or field == "band_descriptor":
+                        result[field] = None # Indicate AI couldn't provide score/feedback/band
+                    else:
+                        result[field] = [] # Default to empty list for text fields
+            
+            # Ensure overall_score is float if not None, derive band descriptor if possible
+            if result.get("overall_score") is not None:
+                try:
+                    result["overall_score"] = float(result["overall_score"])
+                    if result.get("band_descriptor") is None: # Try to derive band if missing
+                         result["band_descriptor"] = get_band_descriptor(result["overall_score"])
+                except (ValueError, TypeError):
+                    result["overall_score"] = None
+                    result["band_descriptor"] = None # Can't derive band without valid score
+            elif result.get("band_descriptor") is not None: # If score is None but band is present, nullify band
+                 result["band_descriptor"] = None
+
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in evaluate_discussion_response: {str(e)}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            # Handle case where response isn't valid JSON - call fallback
+            return create_default_discussion_feedback(transcript) # Pass transcript
         
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -329,7 +410,15 @@ async def generate_pronunciation_drills(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for generate_pronunciation_drills:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in generate_pronunciation_drills: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse pronunciation drills: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -384,7 +473,15 @@ async def analyze_pronunciation_attempt(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for analyze_pronunciation_attempt:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in analyze_pronunciation_attempt: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse pronunciation attempt analysis: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -446,7 +543,15 @@ async def generate_grammar_challenges(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for generate_grammar_challenges:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in generate_grammar_challenges: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse grammar challenges: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -495,7 +600,15 @@ async def evaluate_grammar_correction(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for evaluate_grammar_correction:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in evaluate_grammar_correction: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse grammar correction evaluation: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -600,7 +713,15 @@ async def generate_comprehensive_report(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for generate_comprehensive_report:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in generate_comprehensive_report: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse comprehensive report: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
@@ -674,8 +795,905 @@ async def generate_progress_trends(
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        try:
+            logger.debug(f"Raw Gemini response for generate_progress_trends:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            return json.loads(cleaned_text) # Parse cleaned
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in generate_progress_trends: {e}")
+            logger.error(f"Problematic raw text: {response.text}")
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            return {"error": f"Failed to parse progress trends: {e}"}
     
     except Exception as e:
         print(f"Gemini API Error: {str(e)}")
         return {"error": "Failed to generate progress trends"}
+
+async def analyze_pronunciation(transcript: str, pronunciation_analysis: dict, proficiency_level: ProficiencyLevel) -> Dict[str, Any]:
+    """
+    Analyze pronunciation patterns in user's speech using Gemini API.
+    
+    Returns detailed pronunciation feedback with scores for different aspects.
+    """
+    try:
+        overall_score = pronunciation_analysis.get("overall_score", 70)
+        potential_challenges = pronunciation_analysis.get("potential_challenges", [])
+
+        model = genai.GenerativeModel('gemini-1.5-pro')
+
+        prompt = f"""
+        You are an expert English pronunciation coach.
+        Analyze this transcript and pronunciation feedback for a {proficiency_level.value} level English learner:
+        
+        Transcript: "{transcript}"
+        
+        Overall Score: {overall_score}/100
+        
+        Challenges identified: {', '.join(potential_challenges) if potential_challenges else 'None specified'}
+        
+        Please provide a detailed pronunciation analysis with the following:
+        1. Scores for different aspects:
+           - vowel_score (0-100)
+           - consonant_score (0-100)
+           - intonation_score (0-100)
+           - stress_score (0-100)
+           - fluency_score (0-100)
+        2. Specific areas that need improvement
+        3. At least 3 strengths in the pronunciation
+        4. At least 3 areas to improve
+        5. At least 4 specific pronunciation exercises for the speaker
+        
+        Format the response as a JSON object with these keys:
+        {{
+            "vowel_score": int,
+            "consonant_score": int,
+            "intonation_score": int, 
+            "stress_score": int,
+            "fluency_score": int,
+            "overall_score": float,
+            "strengths": [list of strings],
+        }}
+        Only return the JSON object, nothing else.
+        """
+
+        # Call the AI model
+        response = model.generate_content(prompt)
+
+        try:
+            # Parse the response text as JSON
+            logger.debug(f"Raw Gemini response for analyze_pronunciation:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            result = json.loads(cleaned_text) # Parse cleaned
+
+            # Ensure required fields are present
+            required_fields = ["vowel_score", "consonant_score", "intonation_score",
+                              "stress_score", "fluency_score", "overall_score",
+                              "strengths", "areas_to_improve", "suggested_exercises"]
+
+            # If AI fails to provide a field, set scores to None, lists to empty
+            for field in required_fields:
+                if field not in result:
+                    if "score" in field:
+                        result[field] = None # Indicate AI couldn't provide score
+                    else:
+                        result[field] = [] # Default to empty list for text fields
+
+            # Transfer the overall score from input if AI didn't provide one
+            if result.get("overall_score") is None:
+                 overall_score_input = pronunciation_analysis.get("overall_score")
+                 result["overall_score"] = float(overall_score_input) / 10 if overall_score_input is not None else None
+
+            return result
+
+        except json.JSONDecodeError as e:
+            print(f"JSONDecodeError in analyze_pronunciation: {str(e)}")
+            # Handle case where response isn't valid JSON - call fallback
+            return create_default_pronunciation_feedback(transcript, pronunciation_analysis)
+
+    except Exception as e:
+        print(f"Error in analyze_pronunciation: {str(e)}")
+        # Call fallback on any primary AI error
+        return create_default_pronunciation_feedback(transcript, pronunciation_analysis)
+
+def create_default_pronunciation_feedback(transcript: str, pronunciation_analysis: dict) -> Dict[str, Any]:
+    """Create default pronunciation feedback, attempting secondary AI call for scores."""
+    overall_score_100 = pronunciation_analysis.get("overall_score") # Keep original input score if available
+    score_keys = ["vowel_score", "consonant_score", "intonation_score", "stress_score", "fluency_score", "overall_score"]
+    final_scores = {key: None for key in score_keys} # Initialize scores to None
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        prompt = f"""
+        Analyze the following transcript and estimate pronunciation scores.
+        Transcript: "{transcript}"
+        Previous overall score estimate: {overall_score_100}/100 if available, otherwise unknown.
+        
+        Return ONLY a JSON object with integer scores (0-100) for: {', '.join(score_keys[:-1])} and a float score (0-10) for overall_score.
+        If estimation is not possible, return null for scores.
+        Example: {{ "vowel_score": 75, "consonant_score": 72, ..., "overall_score": 7.4 }}
+        """
+        response = model.generate_content(prompt)
+        logger.debug(f"Raw Gemini response for secondary pronunciation feedback:\n{response.text}")
+        cleaned_text = _clean_json_response(response.text) # Clean
+        scores = json.loads(cleaned_text) # Parse cleaned
+        # Update final_scores with AI-generated scores, keeping None if AI returned null or key missing
+        for key in score_keys:
+            final_scores[key] = scores.get(key) # Use .get() which returns None if key missing
+
+    except Exception as e:
+        print(f"Secondary AI call failed in create_default_pronunciation_feedback: {e}")
+        # Keep scores as None if secondary call fails
+
+    # Ensure overall_score is float if not None
+    if final_scores["overall_score"] is not None:
+        try:
+            final_scores["overall_score"] = float(final_scores["overall_score"])
+        except (ValueError, TypeError):
+             final_scores["overall_score"] = None # Set back to None if conversion fails
+
+    return {
+        **final_scores,
+        "strengths": [
+            "AI analysis failed, providing generic feedback.",
+            "Focus on overall clarity."
+        ],
+        "areas_to_improve": [
+            "Review common pronunciation errors for your level.",
+            "Practice minimal pairs.",
+            "Work on sentence stress and intonation."
+        ],
+        "suggested_exercises": [
+            "Record yourself and compare to native speakers.",
+            "Use online pronunciation resources.",
+            "Practice tongue twisters."
+        ]
+    }
+
+async def analyze_grammar_response(transcript: str, question: str, corrections: List[dict], proficiency_level: ProficiencyLevel) -> Dict[str, Any]:
+    """
+    Analyze grammar patterns in user's speech using Gemini API.
+    
+    Returns detailed grammar feedback with scores and specific feedback areas.
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro') # Initialize model
+        prompt = f"""
+        You are an expert English grammar teacher.
+        Analyze this grammar correction attempt by a {proficiency_level.value} level English learner:
+
+        Original challenge: "{question}"
+        User's response: "{transcript}"
+
+        Grammar corrections found: {json.dumps(corrections) if corrections else "None"}
+
+        Please provide a detailed grammar analysis with the following:
+        1. Scores for different grammar aspects:
+           - verb_forms_score (0-100)
+           - agreement_score (0-100)
+           - articles_score (0-100)
+           - prepositions_score (0-100)
+           - word_order_score (0-100)
+        2. An overall grammar score (0-100)
+        3. Specific feedback (a short string) on Punctuation usage.
+        4. Specific feedback (a short string) on Sentence Structure (variety, complexity).
+        5. At least 3 strengths in the response
+        6. At least 3 areas that need improvement (mention specific error types if possible)
+        7. At least 4 specific grammar exercises for the learner
+        8. Overall score (float, 0-10 scale) reflecting overall grammatical accuracy.
+
+        Format the response as a JSON object with these keys:
+        {{
+            "verb_forms_score": int | null,
+            "agreement_score": int | null,
+            "articles_score": int | null,
+            "prepositions_score": int | null,
+            "word_order_score": int | null,
+            "grammar_score": int | null,
+            "punctuation_feedback": string | null,
+            "sentence_structure_feedback": string | null,
+            "overall_score": float | null,
+            "strengths": [list of strings],
+            "areas_to_improve": [list of strings],
+            "suggested_exercises": [list of strings]
+        }}
+        Only return the JSON object, nothing else.
+        """
+
+        # Call the AI model
+        response = model.generate_content(prompt)
+
+        try:
+            # Parse the response text as JSON
+            logger.debug(f"Raw Gemini response for analyze_grammar_response:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            result = json.loads(cleaned_text) # Parse cleaned
+
+            # Ensure required fields are present
+            required_fields = ["verb_forms_score", "agreement_score", "articles_score",
+                              "prepositions_score", "word_order_score", "grammar_score",
+                              "punctuation_feedback", "sentence_structure_feedback", # Added fields
+                              "overall_score", "strengths", "areas_to_improve", "suggested_exercises"]
+
+            # If AI fails to provide a field, set scores/feedback to None, lists to empty
+            for field in required_fields:
+                if field not in result:
+                    if "score" in field or "feedback" in field:
+                        result[field] = None # Indicate AI couldn't provide score/feedback
+                    else:
+                        result[field] = [] # Default to empty list for text fields
+            
+            # Ensure overall_score is float if not None
+            if result.get("overall_score") is not None:
+                try:
+                    result["overall_score"] = float(result["overall_score"])
+                except (ValueError, TypeError):
+                    result["overall_score"] = None
+
+            return result
+
+        except json.JSONDecodeError as e:
+            print(f"JSONDecodeError in analyze_grammar_response: {str(e)}")
+            # Handle case where response isn't valid JSON - call fallback
+            return create_default_grammar_feedback(transcript, corrections)
+
+    except Exception as e:
+        print(f"Error in analyze_grammar_response: {str(e)}")
+        # Call fallback on any primary AI error
+        return create_default_grammar_feedback(transcript, corrections)
+
+
+def create_default_grammar_feedback(transcript: str, corrections: List[dict]) -> Dict[str, Any]:
+    """Create default grammar feedback, attempting secondary AI call for scores and feedback."""
+    num_corrections = len(corrections)
+    score_keys = ["verb_forms_score", "agreement_score", "articles_score", "prepositions_score", "word_order_score", "grammar_score", "overall_score"]
+    feedback_keys = ["punctuation_feedback", "sentence_structure_feedback"]
+    final_scores = {key: None for key in score_keys} # Initialize scores to None
+    final_feedback = {key: None for key in feedback_keys} # Initialize feedback to None
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        prompt = f"""
+        Analyze the following transcript and estimate grammar scores and provide brief feedback, considering {num_corrections} corrections were found.
+        Transcript: "{transcript}"
+        
+        Return ONLY a JSON object with:
+        - Integer scores (0-100) for: {', '.join(score_keys[:-1])}
+        - A float score (0-10) for overall_score.
+        - A short string feedback for: {', '.join(feedback_keys)}.
+        If estimation is not possible, return null for scores/feedback.
+        Example: {{ "verb_forms_score": 75, ..., "grammar_score": 70, "punctuation_feedback": "Generally good, check comma usage.", "sentence_structure_feedback": "Try varying sentence length.", "overall_score": 7.0 }}
+        """
+        response = model.generate_content(prompt)
+        logger.debug(f"Raw Gemini response for secondary grammar feedback:\n{response.text}")
+        cleaned_text = _clean_json_response(response.text) # Clean
+        data = json.loads(cleaned_text) # Parse cleaned
+        # Update final_scores and final_feedback with AI-generated data
+        for key in score_keys:
+            final_scores[key] = data.get(key)
+        for key in feedback_keys:
+            final_feedback[key] = data.get(key)
+
+    except Exception as e:
+        print(f"Secondary AI call failed in create_default_grammar_feedback: {e}")
+        # Keep scores and feedback as None if secondary call fails
+    
+    # Ensure overall_score is float if not None
+    if final_scores["overall_score"] is not None:
+        try:
+            final_scores["overall_score"] = float(final_scores["overall_score"])
+        except (ValueError, TypeError):
+             final_scores["overall_score"] = None
+             
+    # Provide generic text if feedback is still None
+    if final_feedback["punctuation_feedback"] is None:
+        final_feedback["punctuation_feedback"] = "AI analysis failed. Review standard punctuation rules."
+    if final_feedback["sentence_structure_feedback"] is None:
+        final_feedback["sentence_structure_feedback"] = "AI analysis failed. Aim for clear and varied sentences."
+
+
+    return {
+        **final_scores,
+        **final_feedback,
+        "strengths": [
+            "AI analysis failed, providing generic feedback.",
+            f"Number of corrections identified: {num_corrections} (if available)."
+        ],
+        "areas_to_improve": [
+            "Review fundamental grammar rules.",
+            "Focus on sentence structure and punctuation.",
+            "Check for common errors like tense and agreement."
+        ],
+        "suggested_exercises": [
+            "Use grammar checking tools.",
+            "Complete targeted grammar exercises.",
+            "Review explanations for identified corrections (if any)."
+        ]
+    }
+
+
+async def evaluate_discussion_response(question: str, transcript: str, proficiency_level: ProficiencyLevel) -> Dict[str, Any]:
+    """
+    Evaluate a discussion response using Gemini API.
+    
+    Returns detailed feedback including punctuation and sentence structure.
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro') # Initialize model
+        prompt = f"""
+        You are an expert English language assessor.
+        Evaluate this {proficiency_level.value} level English learner's response to a discussion question:
+
+        Question: "{question}"
+        Response: "{transcript}"
+
+        Please provide a detailed evaluation with the following:
+        1. Content score (0-100): relevance, development, examples
+        2. Organization score (0-100): structure, coherence, linking devices
+        3. Grammar score (0-100): accuracy and range
+        4. Vocabulary score (0-100): range and appropriateness
+        5. Fluency score (0-100): smoothness, hesitation, repetition
+        6. Specific feedback (a short string) on Punctuation usage.
+         7. Specific feedback (a short string) on Sentence Structure (variety, complexity).
+        8. At least 3 strengths
+        9. At least 3 areas that need improvement (mention specifics)
+        10. At least 4 suggested exercises
+        11. Overall score on scale of 1-9 (where 9 is highest)
+
+        Format the response as a JSON object with these keys:
+        {{
+            "content_score": int | null,
+            "organization_score": int | null,
+            "grammar_score": int | null,
+            "vocabulary_score": int | null,
+            "fluency_score": int | null,
+            "punctuation_feedback": string | null,
+            "sentence_structure_feedback": string | null,
+            "overall_score": float | null,
+            "band_descriptor": string | null,
+            "strengths": [list of strings],
+            "areas_to_improve": [list of strings],
+            "suggested_exercises": [list of strings]
+        }}
+        Only return the JSON object, nothing else.
+        """
+
+        # Call the AI model
+        response = model.generate_content(prompt)
+
+        try:
+            # Parse the response text as JSON
+            logger.debug(f"Raw Gemini response for evaluate_discussion_response:\n{response.text}")
+            cleaned_text = _clean_json_response(response.text) # Clean
+            result = json.loads(cleaned_text) # Parse cleaned
+
+            # Ensure required fields are present
+            required_fields = ["content_score", "organization_score", "grammar_score",
+                              "vocabulary_score", "fluency_score", 
+                              "punctuation_feedback", "sentence_structure_feedback", # Added fields
+                              "overall_score", "band_descriptor", 
+                              "strengths", "areas_to_improve", "suggested_exercises"]
+
+            # If AI fails to provide a field, set scores/feedback/band to None, lists to empty
+            for field in required_fields:
+                if field not in result:
+                    if "score" in field or "feedback" in field or field == "band_descriptor":
+                        result[field] = None # Indicate AI couldn't provide score/feedback/band
+                    else:
+                        result[field] = [] # Default to empty list for text fields
+            
+            # Ensure overall_score is float if not None, derive band descriptor if possible
+            if result.get("overall_score") is not None:
+                try:
+                    result["overall_score"] = float(result["overall_score"])
+                    result["overall_score"] = max(1.0, min(9.0, result["overall_score"])) # Clamp score
+                    if result.get("band_descriptor") is None: # Try to derive band if missing
+                         result["band_descriptor"] = get_band_descriptor(result["overall_score"])
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert discussion overall_score '{result.get('overall_score')}' to float.")
+                    result["overall_score"] = None
+                    result["band_descriptor"] = None # Can't derive band without valid score
+            elif result.get("band_descriptor") is not None: # If score is None but band is present, nullify band
+                 logger.warning("Discussion overall score is None, but band descriptor is present. Nullifying band.")
+                 result["band_descriptor"] = None
+
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in evaluate_discussion_response: {str(e)}")
+            logger.error(f"Problematic raw text: {response.text}") # Log raw text
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}") # Log cleaned text
+            # Handle case where response isn't valid JSON - call fallback
+            return create_default_discussion_feedback(transcript)
+
+    except Exception as e:
+        logger.error(f"Error in evaluate_discussion_response: {str(e)}")
+         # Call fallback on any primary AI error
+        return create_default_discussion_feedback(transcript)
+
+
+def create_default_discussion_feedback(transcript: str) -> Dict[str, Any]:
+    """Create default discussion feedback, attempting secondary AI call for scores and feedback."""
+    word_count = len(transcript.split())
+    score_keys = ["content_score", "organization_score", "grammar_score", "vocabulary_score", "fluency_score", "overall_score"]
+    feedback_keys = ["punctuation_feedback", "sentence_structure_feedback"]
+    final_scores = {key: None for key in score_keys} # Initialize scores to None
+    final_feedback = {key: None for key in feedback_keys} # Initialize feedback to None
+    band_descriptor = None
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        prompt = f"""
+        Analyze the following transcript ({word_count} words) and estimate discussion performance scores and provide brief feedback.
+        Transcript: "{transcript}"
+        
+        Return ONLY a JSON object with:
+        - Integer scores (0-100) for: {', '.join(score_keys[:-1])}
+        - A float score (1-9) for overall_score.
+        - A short string feedback for: {', '.join(feedback_keys)}.
+        If estimation is not possible, return null for scores/feedback.
+        Example: {{ "content_score": 75, ..., "fluency_score": 70, "punctuation_feedback": "Check comma usage.", "sentence_structure_feedback": "Good variety.", "overall_score": 7.0 }}
+        """
+        response = model.generate_content(prompt)
+        logger.debug(f"Raw Gemini response for secondary discussion feedback:\n{response.text}")
+        cleaned_text = _clean_json_response(response.text) # Clean
+        data = json.loads(cleaned_text) # Parse cleaned
+        # Update final_scores and final_feedback with AI-generated data
+        for key in score_keys:
+            final_scores[key] = data.get(key)
+        for key in feedback_keys:
+            final_feedback[key] = data.get(key)
+
+
+        # Ensure overall score is float and derive band descriptor
+        if final_scores["overall_score"] is not None:
+            try:
+                final_scores["overall_score"] = float(final_scores["overall_score"])
+                # Ensure overall score is within 1-9 range
+                final_scores["overall_score"] = max(1.0, min(9.0, final_scores["overall_score"]))
+                band_descriptor = get_band_descriptor(final_scores["overall_score"])
+            except (ValueError, TypeError):
+                final_scores["overall_score"] = None # Set back to None if conversion fails
+                band_descriptor = None
+
+    except Exception as e:
+        logger.error(f"Secondary AI call failed in create_default_discussion_feedback: {e}")
+        # Keep scores, feedback and band_descriptor as None
+
+    # Provide generic text if feedback is still None
+    if final_feedback["punctuation_feedback"] is None:
+        final_feedback["punctuation_feedback"] = "AI analysis failed. Review standard punctuation rules."
+    if final_feedback["sentence_structure_feedback"] is None:
+        final_feedback["sentence_structure_feedback"] = "AI analysis failed. Aim for clear and varied sentences."
+
+    return {
+        **final_scores,
+        **final_feedback,
+        "band_descriptor": band_descriptor,
+        "strengths": [
+            "AI analysis failed, providing generic feedback."
+        ],
+        "areas_to_improve": [
+            "Focus on clarity, relevance, structure, and accuracy.",
+            "Review punctuation and sentence construction."
+        ],
+        "suggested_exercises": [
+            "Review model answers for similar discussion questions.",
+            "Practice outlining responses before speaking.",
+            "Focus on specific grammar/vocab weaknesses."
+        ]
+    }
+
+
+async def evaluate_cue_card_response(topic: str, transcript: str, proficiency_level: ProficiencyLevel) -> Dict[str, Any]:
+    """
+    Evaluate a cue card response using Gemini API.
+    
+    Returns detailed feedback including punctuation and sentence structure.
+    """
+    try:
+        if not genai: raise Exception("Gemini AI client not initialized.") # Check genai
+        model = genai.GenerativeModel('gemini-1.5-pro') # Initialize model
+        
+        # Define the prompt for cue card evaluation
+        prompt = f"""
+        You are an expert English language assessor.
+        Evaluate this {proficiency_level.value} level English learner's response to a cue card topic:
+
+        Topic: "{topic}"
+        Response: "{transcript}"
+
+        Please provide a detailed evaluation with the following:
+        1. Task completion score (0-100): addressing all parts of the prompt
+        2. Coherence score (0-100): organization, logical flow, linking devices
+        3. Grammar score (0-100): accuracy and range
+        4. Vocabulary score (0-100): range and appropriateness
+        5. Fluency score (0-100): smoothness, hesitation, repetition
+        6. Specific feedback (a short string) on Punctuation usage.
+        7. Specific feedback (a short string) on Sentence Structure (variety, complexity).
+        8. At least 3 strengths
+        9. At least 3 areas that need improvement (mention specifics)
+        10. At least 4 suggested exercises
+        11. Overall score on scale of 1-9 (where 9 is highest)
+        12. Band descriptor string based on overall score.
+
+        Format the response ONLY as a JSON object with these keys:
+        {{
+            "task_completion_score": int | null,
+            "coherence_score": int | null,
+            "grammar_score": int | null,
+            "vocabulary_score": int | null,
+            "fluency_score": int | null,
+            "punctuation_feedback": string | null,
+            "sentence_structure_feedback": string | null,
+            "overall_score": float | null,
+            "band_descriptor": string | null,
+            "strengths": [list of strings],
+            "areas_to_improve": [list of strings],
+            "suggested_exercises": [list of strings]
+        }}
+        Only return the JSON object, nothing else.
+        If analysis is not possible, return null for scores/feedback/band and empty lists for text fields.
+        """
+
+        # Call the AI model
+        api_response = model.generate_content(prompt) # Assign to api_response
+
+        try:
+            # Parse the response text as JSON
+            logger.debug(f"Raw Gemini response for cue card evaluation:\n{api_response.text}") # Use api_response.text
+            cleaned_text = _clean_json_response(api_response.text) # Clean the text
+            result = json.loads(cleaned_text) # Parse cleaned text
+
+            # ... existing field validation and processing ...
+            # Ensure overall_score is float if not None, derive band descriptor if possible
+            if result.get("overall_score") is not None:
+                try:
+                    result["overall_score"] = float(result["overall_score"])
+                    result["overall_score"] = max(1.0, min(9.0, result["overall_score"])) # Clamp score
+                    if result.get("band_descriptor") is None: # Try to derive band if missing
+                         result["band_descriptor"] = get_band_descriptor(result["overall_score"])
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert cue card overall_score '{result.get('overall_score')}' to float.")
+                    result["overall_score"] = None
+                    result["band_descriptor"] = None # Can't derive band without valid score
+            elif result.get("band_descriptor") is not None: # If score is None but band is present, nullify band
+                 logger.warning("Cue card overall score is None, but band descriptor is present. Nullifying band.")
+                 result["band_descriptor"] = None
+            
+            # Add pronunciation score if missing (might be expected by frontend)
+            result.setdefault("pronunciation_score", None)
+
+
+            return result
+
+        except json.JSONDecodeError as e:
+            # Log the error and the problematic response text
+            logger.error(f"JSONDecodeError in evaluate_cue_card_response: {str(e)}")
+            logger.error(f"Problematic response text: {api_response.text}") # Use api_response.text
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}")
+            # Handle case where response isn't valid JSON - call fallback
+            return create_default_cue_card_feedback(transcript, f"AI response was not valid JSON: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in evaluate_cue_card_response: {str(e)}", exc_info=True) 
+        # Call fallback on any primary AI error
+        return create_default_cue_card_feedback(transcript, f"Primary AI call failed: {e}")
+
+def get_band_descriptor(score: Optional[float]) -> Optional[str]:
+    """Get appropriate band descriptor based on overall score"""
+    if score is None:
+        return None
+    if score >= 8.5:
+        return "Expert User"
+    elif score >= 7.5:
+        return "Very Good User"
+    elif score >= 6.5:
+        return "Good User"
+    elif score >= 5.5:
+        return "Competent User"
+    elif score >= 4.5:
+        return "Modest User"
+    elif score >= 3.5:
+        return "Limited User"
+    elif score >= 2.5:
+        return "Extremely Limited User"
+    else:
+        return "Intermittent User"
+
+def create_default_cue_card_feedback(transcript: str, error_reason: str = "AI analysis failed") -> Dict[str, Any]:
+    """Create default cue card feedback, attempting secondary AI call for scores and feedback."""
+    word_count = len(transcript.split())
+    score_keys = ["task_completion_score", "coherence_score", "grammar_score", "vocabulary_score", "fluency_score", "overall_score"]
+    feedback_keys = ["punctuation_feedback", "sentence_structure_feedback"]
+    final_scores = {key: None for key in score_keys} # Initialize scores to None
+    final_feedback = {key: None for key in feedback_keys} # Initialize feedback to None
+    band_descriptor = None
+    secondary_call_failed = False # Flag to track secondary call status
+
+    try:
+        # Attempt secondary, simpler AI call for basic scores/feedback
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        prompt = f"""
+        Analyze the following cue card response transcript ({word_count} words) and estimate performance scores and provide brief feedback.
+        Transcript: "{transcript}"
+        
+        Return ONLY a JSON object with:
+        - Integer scores (0-100) for: {', '.join(score_keys[:-1])}
+        - A float score (1-9) for overall_score.
+        - A short string feedback for: {', '.join(feedback_keys)}.
+        If estimation is not possible, return null for scores/feedback.
+        Example: {{ "task_completion_score": 75, ..., "fluency_score": 70, "punctuation_feedback": "Mostly correct.", "sentence_structure_feedback": "Repetitive structures.", "overall_score": 7.0 }}
+        """
+        secondary_response = model.generate_content(prompt)
+        
+        try:
+            logger.debug(f"Raw Gemini response for secondary feedback call:\n{secondary_response.text}")
+            cleaned_text = _clean_json_response(secondary_response.text) # Clean the text
+            data = json.loads(cleaned_text) # Parse cleaned text
+             # Update final_scores and final_feedback with AI-generated data
+            for key in score_keys:
+                final_scores[key] = data.get(key)
+            for key in feedback_keys:
+                final_feedback[key] = data.get(key)
+
+            # Ensure overall score is float and derive band descriptor
+            if final_scores["overall_score"] is not None:
+                try:
+                    final_scores["overall_score"] = float(final_scores["overall_score"])
+                    # Ensure overall score is within 1-9 range
+                    final_scores["overall_score"] = max(1.0, min(9.0, final_scores["overall_score"]))
+                    band_descriptor = get_band_descriptor(final_scores["overall_score"])
+                except (ValueError, TypeError):
+                    logger.warning("Could not convert secondary overall_score to float.")
+                    final_scores["overall_score"] = None # Set back to None if conversion fails
+                    band_descriptor = None
+        
+        except json.JSONDecodeError as json_e:
+            secondary_call_failed = True
+            logger.error(f"Secondary AI call JSONDecodeError in create_default_cue_card_feedback: {json_e}")
+            logger.error(f"Problematic secondary response text: {secondary_response.text}")
+            logger.error(f"Attempted to parse cleaned secondary text: {cleaned_text}")
+            # Keep scores, feedback and band_descriptor as None
+
+    except Exception as e:
+        secondary_call_failed = True
+        logger.error(f"Secondary AI call failed in create_default_cue_card_feedback: {e}", exc_info=True)
+        # Keep scores, feedback and band_descriptor as None
+
+    # Provide generic text if feedback is still None or secondary call failed
+    generic_reason = "AI analysis failed." if not secondary_call_failed else "Secondary AI analysis failed."
+    
+    if final_feedback["punctuation_feedback"] is None:
+        final_feedback["punctuation_feedback"] = f"{generic_reason} Review standard punctuation rules."
+    if final_feedback["sentence_structure_feedback"] is None:
+        final_feedback["sentence_structure_feedback"] = f"{generic_reason} Aim for clear and varied sentences."
+
+    return {
+        **final_scores,
+        **final_feedback,
+        "band_descriptor": band_descriptor,
+        "strengths": [
+             f"{error_reason}. Providing generic feedback." # Include original error reason
+        ],
+        "areas_to_improve": [
+            "Ensure all parts of the cue card are addressed.",
+            "Practice organizing your response logically.",
+            "Expand vocabulary related to common cue card topics.",
+            "Check grammar, punctuation, and sentence structure."
+        ],
+        "suggested_exercises": [
+            "Practice speaking for 1-2 minutes on various cue card topics.",
+            "Use structuring techniques (e.g., PREP).",
+            "Record and review your responses.",
+            "Focus on specific grammar/vocab weaknesses."
+        ],
+        # Add an error field to explicitly signal the fallback was used
+        "error": error_reason 
+    }
+
+async def evaluate_general_speaking(
+    question: str, 
+    transcript: str, 
+    proficiency_level: ProficiencyLevel,
+    corrections: Optional[List[dict]] = None, # Made corrections Optional
+    pronunciation_analysis: Optional[dict] = None # Made pronunciation_analysis Optional
+) -> Dict[str, Any]:
+    """
+    Evaluate general speaking performance using Gemini API.
+
+    Returns comprehensive feedback combining grammar, pronunciation, and content analysis.
+    """
+    # Extract pronunciation score if available, keep it as int/None
+    pronunciation_score_input = pronunciation_analysis.get("overall_score") if pronunciation_analysis else None # Handle None input
+
+    try:
+        if not genai: raise Exception("Gemini AI client not initialized.")
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        
+        # Construct prompt (adjust as needed)
+        prompt = f"""
+        You are an English language assessor. Evaluate this {proficiency_level.value} level learner's response.
+        Context/Question: "{question if question else 'General speaking practice'}"
+        Response Transcript: "{transcript}"
+        
+        Provide a detailed evaluation including:
+        1. Grammar score (0-100)
+        2. Vocabulary score (0-100)
+        3. Fluency score (0-100) - consider smoothness, hesitations
+        4. Pronunciation score (0-100) - based on clarity and accuracy (consider provided analysis if available)
+        5. Overall score (1-9 float)
+        6. Band descriptor string based on overall score.
+        7. Strengths (list of strings, at least 2)
+        8. Areas to improve (list of strings, at least 2)
+        9. Suggested exercises (list of strings, at least 3)
+
+        Format the response ONLY as a JSON object with keys:
+        "grammar_score", "vocabulary_score", "fluency_score", "pronunciation_score", 
+        "overall_score", "band_descriptor", "strengths", "areas_to_improve", "suggested_exercises"
+        
+        Example: {{ "grammar_score": 80, ..., "overall_score": 7.5, "band_descriptor": "Very Good User", ... }}
+        If analysis is not possible, return null for scores/band and empty lists for text fields.
+        """
+        
+        # Add pronunciation context if available
+        if pronunciation_analysis and not pronunciation_analysis.get('error'):
+             prompt += f"\nConsider this pronunciation analysis: {json.dumps(pronunciation_analysis)}"
+             
+        # Add grammar correction context if available
+        if corrections:
+             prompt += f"\nConsider these potential grammar issues identified earlier: {json.dumps(corrections)}"
+
+        # Call the AI model
+        api_response = model.generate_content(prompt) # Assign to api_response
+
+        try:
+            # Log the raw response text for debugging
+            logger.debug(f"Raw Gemini response for general speaking evaluation:\n{api_response.text}") # Use api_response.text
+            cleaned_text = _clean_json_response(api_response.text) # Clean the text
+            result = json.loads(cleaned_text) # Parse cleaned text
+
+            # Ensure required fields are present
+            required_fields = ["grammar_score", "vocabulary_score", "pronunciation_score",
+                              "fluency_score", "overall_score", "band_descriptor",
+                              "strengths", "areas_to_improve", "suggested_exercises"]
+
+            # If AI fails to provide a field, set scores/band to None, lists to empty
+            for field in required_fields:
+                 if field not in result:
+                    # Special handling for pronunciation_score - use input if missing
+                    if field == "pronunciation_score":
+                         result[field] = pronunciation_score_input if pronunciation_score_input is not None else None
+                    elif "score" in field or field == "band_descriptor":
+                        result[field] = None # Indicate AI couldn't provide score/band
+                    else:
+                        result[field] = [] # Default to empty list for text fields
+            
+            # Ensure overall_score is float if not None, derive band descriptor if possible
+            if result.get("overall_score") is not None:
+                try:
+                    result["overall_score"] = float(result["overall_score"])
+                    result["overall_score"] = max(1.0, min(9.0, result["overall_score"])) # Clamp score
+                    if result.get("band_descriptor") is None: # Try to derive band if missing
+                         result["band_descriptor"] = get_band_descriptor(result["overall_score"])
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert general speaking overall_score '{result.get('overall_score')}' to float.")
+                    result["overall_score"] = None
+                    result["band_descriptor"] = None # Can't derive band without valid score
+            elif result.get("band_descriptor") is not None: # If score is None but band is present, nullify band
+                 logger.warning("General speaking overall score is None, but band descriptor is present. Nullifying band.")
+                 result["band_descriptor"] = None
+
+            # Ensure pronunciation score is the one from input if AI didn't override or provided None
+            if result.get("pronunciation_score") is None and pronunciation_score_input is not None:
+                 result["pronunciation_score"] = pronunciation_score_input
+            
+            # Add other expected fields if missing (e.g., from cue card schema)
+            result.setdefault("punctuation_feedback", None)
+            result.setdefault("sentence_structure_feedback", None)
+            result.setdefault("task_completion_score", None)
+            result.setdefault("coherence_score", None)
+
+
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError in evaluate_general_speaking: {str(e)}")
+            logger.error(f"Problematic raw text: {api_response.text}") # Log raw text
+            logger.error(f"Attempted to parse cleaned text: {cleaned_text}") # Log cleaned text
+            # Handle case where response isn't valid JSON - call fallback
+            return create_default_general_speaking_feedback(transcript, corrections, pronunciation_score_input, f"AI response was not valid JSON: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in evaluate_general_speaking: {str(e)}", exc_info=True)
+         # Call fallback on any primary AI error
+        return create_default_general_speaking_feedback(transcript, corrections, pronunciation_score_input, f"Primary AI call failed: {e}")
+
+
+def create_default_general_speaking_feedback(
+    transcript: str, 
+    corrections: Optional[List[dict]], 
+    pronunciation_score_input: Optional[int],
+    error_reason: str = "AI analysis failed" # Add error reason parameter
+) -> Dict[str, Any]:
+    """Create default general speaking feedback, attempting secondary AI call for scores."""
+    word_count = len(transcript.split())
+    num_corrections = len(corrections) if corrections else 0
+    # Note: pronunciation_score is passed in, others need estimation
+    score_keys = ["grammar_score", "vocabulary_score", "fluency_score", "overall_score"] # Exclude pronunciation
+    final_scores = {key: None for key in score_keys} # Initialize scores to None
+    final_scores["pronunciation_score"] = pronunciation_score_input # Use the input score directly
+    band_descriptor = None
+    secondary_call_failed = False
+
+    try:
+        if not genai: raise Exception("Gemini AI client not initialized.")
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        pron_score_info = f"{pronunciation_score_input}/100" if pronunciation_score_input is not None else "unknown"
+        prompt = f"""
+        Analyze the following transcript ({word_count} words) and estimate general speaking scores. 
+        Consider {num_corrections} grammar corrections were found and a previous pronunciation score estimate of {pron_score_info}.
+        Transcript: "{transcript}"
+        
+        Return ONLY a JSON object with integer scores (0-100) for: grammar_score, vocabulary_score, fluency_score, and a float score (1-9) for overall_score.
+        If estimation is not possible, return null for scores.
+        Example: {{ "grammar_score": 75, "vocabulary_score": 72, "fluency_score": 70, "overall_score": 7.0 }}
+        """
+        secondary_response = model.generate_content(prompt) # Assign to secondary_response
+        
+        try:
+            logger.debug(f"Raw Gemini response for secondary general feedback call:\n{secondary_response.text}") # Use secondary_response.text
+            cleaned_text = _clean_json_response(secondary_response.text) # Clean the text
+            scores = json.loads(cleaned_text) # Parse cleaned text
+            
+            # Update final_scores with AI-generated scores, keeping None if AI returned null or key missing
+            for key in score_keys: # Only update keys estimated by secondary AI
+                final_scores[key] = scores.get(key)
+            
+            # Ensure overall score is float and derive band descriptor
+            if final_scores["overall_score"] is not None:
+                try:
+                    final_scores["overall_score"] = float(final_scores["overall_score"])
+                     # Ensure overall score is within 1-9 range
+                    final_scores["overall_score"] = max(1.0, min(9.0, final_scores["overall_score"]))
+                    band_descriptor = get_band_descriptor(final_scores["overall_score"])
+                except (ValueError, TypeError):
+                    logger.warning("Could not convert secondary general speaking overall_score to float.")
+                    final_scores["overall_score"] = None # Set back to None if conversion fails
+                    band_descriptor = None
+        
+        except json.JSONDecodeError as json_e:
+            secondary_call_failed = True
+            logger.error(f"Secondary AI call JSONDecodeError in create_default_general_speaking_feedback: {json_e}")
+            logger.error(f"Problematic secondary response text: {secondary_response.text}") # Use secondary_response.text
+
+    except Exception as e:
+        secondary_call_failed = True
+        logger.error(f"Secondary AI call failed in create_default_general_speaking_feedback: {e}", exc_info=True)
+        # Keep estimated scores (grammar, vocab, fluency, overall) as None
+        # Pronunciation score remains as the input value
+
+    generic_reason = "AI analysis failed." if not secondary_call_failed else "Secondary AI analysis failed."
+
+    return {
+        **final_scores, # Includes pronunciation_score from input
+        "band_descriptor": band_descriptor,
+        "strengths": [
+            f"{error_reason}. Providing generic feedback." # Include original error reason
+        ],
+        "areas_to_improve": [
+            "Focus on overall fluency and coherence.",
+            "Review grammar and vocabulary relevant to the topic.",
+            "Check pronunciation clarity."
+        ],
+        "suggested_exercises": [
+            "Practice speaking on diverse topics.",
+            "Record and analyze your speech.",
+            "Seek feedback from peers or teachers if possible."
+        ],
+        # Add other fields expected by frontend/backend, even if None/empty
+        "punctuation_feedback": f"{generic_reason} Check punctuation usage.",
+        "sentence_structure_feedback": f"{generic_reason} Vary sentence structures.",
+        "task_completion_score": None, 
+        "coherence_score": None,
+        "error": error_reason # Add the error reason to the response
+    }

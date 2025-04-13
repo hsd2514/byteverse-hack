@@ -18,6 +18,7 @@ from app.api.conversation import router as conversation_router
 from app.api.grammar import router as grammar_router
 from app.api.practice import router as practice_router
 from app.api.reports import router as reports_router
+from app.api.auth import router as auth_router
 # from app.api.lesson import router as lesson_router
 # from app.api.user import router as user_router
 
@@ -26,6 +27,7 @@ app.include_router(conversation_router)
 app.include_router(grammar_router)
 app.include_router(practice_router)
 app.include_router(reports_router)
+app.include_router(auth_router) # Register the auth router
 # app.include_router(lesson_router)
 # app.include_router(user_router)
 

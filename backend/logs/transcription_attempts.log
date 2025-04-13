@@ -1,0 +1,9 @@
+2025-04-13 10:05:23,130 - transcription.attempts - INFO - Attempting real transcription for: E:\project\hack\bv2025\draft 1\backend\audio_storage\audio_20250413_100523_f00a0230.webm
+2025-04-13 10:05:23,131 - transcription.attempts - WARNING - OpenAI Whisper not installed, skipping...
+2025-04-13 10:05:23,132 - transcription.attempts - INFO - Running FFmpeg command: E:\project\hack\bv2025\draft 1\backend\tools\ffmpeg.exe -y -i E:\project\hack\bv2025\draft 1\backend\audio_storage\audio_20250413_100523_f00a0230.webm -acodec pcm_s16le -ar 16000 -ac 1 E:\project\hack\bv2025\draft 1\backend\audio_storage\audio_20250413_100523_f00a0230_converted.wav
+2025-04-13 10:05:23,151 - transcription.attempts - WARNING - FFmpeg conversion failed: 
+2025-04-13 10:05:23,160 - transcription.attempts - INFO - File info: {"path": "E:\\project\\hack\\bv2025\\draft 1\\backend\\audio_storage\\audio_20250413_100523_f00a0230.webm", "size": 2312553, "type": "video/x-matroska"}
+2025-04-13 10:05:23,161 - transcription.attempts - INFO - Transcription attempt results: {"success": true, "results": {"file_info": {"path": "E:\\project\\hack\\bv2025\\draft 1\\backend\\audio_storage\\audio_20250413_100523_f00a0230.webm", "size": 2312553, "type": "video/x-matroska"}}}
+2025-04-13 10:05:23,162 - transcription.attempts - INFO - Returning mock response: When preparing for language exams, it's important to practice all four skills: speaking, listening, reading, and writing. Many students focus too much on grammar and vocabulary while neglecting speaking practice.
+2025-04-13 10:26:20,878 - transcription.attempts - ERROR - Transcription failed: cannot access local variable 'whisper_model' where it is not associated with a value
+2025-04-13 10:29:02,083 - transcription.attempts - ERROR - Transcription failed: Whisper model failed to load and mocking is disabled.
